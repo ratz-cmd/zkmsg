@@ -48,7 +48,7 @@ export function generateIdentityKeyPair(seed: SecureBuffer): {
   // Copier la seed comme clé secrète (la seed EST la clé privée Ed25519)
   const secretCopy = new Uint8Array(32);
   secretCopy.set(seedBytes);
-  const secretKey = SecureBuffer.wrap(secretCopy);
+  const secretKey = SecureBuffer.from(secretCopy);
 
   return { publicKey, secretKey };
 }
@@ -81,7 +81,7 @@ export function generateX25519KeyPair(seed: SecureBuffer): {
 
   const secretCopy = new Uint8Array(32);
   secretCopy.set(seedBytes);
-  const secretKey = SecureBuffer.wrap(secretCopy);
+  const secretKey = SecureBuffer.from(secretCopy);
 
   return { publicKey, secretKey };
 }
