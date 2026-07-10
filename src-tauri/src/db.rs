@@ -129,3 +129,13 @@ pub fn save_ratchet_and_message(
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// Closes the database connection and wipes SQLite cache from RAM.
+/// Triggered by React after inactivity.
+#[command]
+pub fn lock_database(state: State<'_, AppState>) -> Result<(), String> {
+    let mut db_guard = state.db.lock().unwrap();
+    // Dropping the Connection explicitly closes the DB descriptor and clears its RAM cache.
+    *db_guard = None;
+    Ok(())
+}

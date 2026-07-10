@@ -1,4 +1,4 @@
-import { x25519 } from '@noble/curves/ed25519';
+import { x25519, ed25519 } from '@noble/curves/ed25519';
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256 } from '@noble/hashes/sha256';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
@@ -9,6 +9,8 @@ export interface PairingPayload {
   seedPhrase: string;
   rootDbKey: string;
   masterIdentityPub: string;
+  assignedDeviceId: number;
+  deviceLinkSignature: string; // Ed25519 signature over the new device's public key
 }
 
 export interface PairingQRData {
@@ -20,6 +22,25 @@ export interface EncryptedPairingMessage {
   mobilePub: string;
   nonce: string;
   ciphertext: string;
+}
+
+/**
+ * Derives a specific device's Ed25519 identity seed from the master seed phrase bytes.
+ * This prevents Ratchet State collisions (Key Reuse) between multiple devices.
+ */
+export function deriveDeviceIdentitySeed(masterSeed: Uint8Array, deviceId: number): Uint8Array {
+  const info = new TextEncoder().encode(`zkmsg-identity-v1-device-${deviceId}`);
+  return hkdf(sha256, masterSeed, undefined, info, 32);
+}
+
+/**
+ * Generates a 6-digit Short Authentication String (SAS) from the SessionKey.
+ */
+function generateSAS(sessionKey: Uint8Array): string {
+  const sasBytes = hkdf(sha256, sessionKey, undefined, "zkmsg-sas-verification", 4);
+  const dataView = new DataView(sasBytes.buffer, sasBytes.byteOffset, sasBytes.byteLength);
+  const num = dataView.getUint32(0, false) % 1000000;
+  return num.toString().padStart(6, '0');
 }
 
 /**
@@ -42,10 +63,16 @@ export function generatePairingSession(): { qrData: PairingQRData, privateKey: S
 
 /**
  * Executes on the MOBILE (Master) device.
- * Consumes the QR code data, generates a local ephemeral key, computes the DH shared secret,
- * encrypts the payload, and returns the ciphertext package to be sent over the socket.
+ * Generates SAS, signs the new device's identity, and encrypts the payload.
  */
-export function encryptSyncPayload(qrData: PairingQRData, payload: PairingPayload): EncryptedPairingMessage {
+export function encryptSyncPayload(
+  qrData: PairingQRData, 
+  seedPhrase: string,
+  masterSeedBytes: Uint8Array,
+  rootDbKey: string,
+  masterIdentityPriv: Uint8Array,
+  newDeviceId: number
+): { message: EncryptedPairingMessage, sasCode: string } {
   const mobilePriv = x25519.utils.randomPrivateKey();
   const mobilePub = x25519.getPublicKey(mobilePriv);
   const desktopPub = bs58.decode(qrData.desktopPub);
@@ -53,36 +80,56 @@ export function encryptSyncPayload(qrData: PairingQRData, payload: PairingPayloa
   // 1. ECDH Shared Secret
   const sharedSecret = x25519.getSharedSecret(mobilePriv, desktopPub);
 
-  // 2. HKDF Key Derivation
+  // 2. HKDF Key Derivation for the Tunnel
   const sessionKey = hkdf(sha256, sharedSecret, undefined, "zkmsg-pairing", 32);
 
-  // 3. XChaCha20-Poly1305 Encryption
+  // 3. Generate SAS for manual verification
+  const sasCode = generateSAS(sessionKey);
+
+  // 4. Cryptographic Linkage: Master signs the Slave's new Public Key
+  const newDeviceSeed = deriveDeviceIdentitySeed(masterSeedBytes, newDeviceId);
+  const newDevicePub = ed25519.getPublicKey(newDeviceSeed);
+  const deviceLinkSignature = ed25519.sign(newDevicePub, masterIdentityPriv);
+
+  const payload: PairingPayload = {
+    seedPhrase,
+    rootDbKey,
+    masterIdentityPub: bs58.encode(ed25519.getPublicKey(masterIdentityPriv)),
+    assignedDeviceId: newDeviceId,
+    deviceLinkSignature: bs58.encode(deviceLinkSignature)
+  };
+
+  // 5. XChaCha20-Poly1305 Encryption
   const nonce = x25519.utils.randomPrivateKey().slice(0, 24);
   const cipher = xchacha20poly1305(sessionKey, nonce);
   
   const plaintext = new TextEncoder().encode(JSON.stringify(payload));
   const ciphertext = cipher.encrypt(plaintext);
 
-  // 4. Secure Zeroing
+  // 6. Secure Zeroing
   mobilePriv.fill(0);
   sharedSecret.fill(0);
   sessionKey.fill(0);
+  newDeviceSeed.fill(0);
 
   return {
-    mobilePub: bs58.encode(mobilePub),
-    nonce: bs58.encode(nonce),
-    ciphertext: bs58.encode(ciphertext),
+    message: {
+      mobilePub: bs58.encode(mobilePub),
+      nonce: bs58.encode(nonce),
+      ciphertext: bs58.encode(ciphertext),
+    },
+    sasCode
   };
 }
 
 /**
  * Executes on the DESKTOP (Slave) device.
- * Receives the encrypted payload from the socket, reconstructs the DH secret, decrypts the payload.
+ * Decrypts the payload and returns the SAS code for the user to verify BEFORE applying the payload.
  */
 export function decryptSyncPayload(
   desktopPriv: SecureBuffer, 
   message: EncryptedPairingMessage
-): PairingPayload {
+): { payload: PairingPayload, sasCode: string } {
   const mobilePub = bs58.decode(message.mobilePub);
   const nonce = bs58.decode(message.nonce);
   const ciphertext = bs58.decode(message.ciphertext);
@@ -98,12 +145,19 @@ export function decryptSyncPayload(
     // 2. HKDF Key Derivation
     sessionKey = hkdf(sha256, sharedSecret, undefined, "zkmsg-pairing", 32);
 
-    // 3. XChaCha20-Poly1305 Decryption
+    // 3. Generate SAS for manual verification
+    const sasCode = generateSAS(sessionKey);
+
+    // 4. XChaCha20-Poly1305 Decryption
     const cipher = xchacha20poly1305(sessionKey, nonce);
     plaintext = cipher.decrypt(ciphertext);
 
     const payload = JSON.parse(new TextDecoder().decode(plaintext)) as PairingPayload;
-    return payload;
+    
+    // Note: The UI layer MUST prompt the user to compare `sasCode` with the Mobile screen
+    // BEFORE accepting `payload` and deriving keys.
+    
+    return { payload, sasCode };
 
   } catch (err) {
     throw new Error("Pairing failed: Payload tampering detected or keys mismatched.");
