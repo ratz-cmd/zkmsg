@@ -117,19 +117,22 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     async (mnemonic: string): Promise<void> => {
       setIsLoading(true);
       setError(null);
+      console.log("🚨 BALISE 1 : Début de la fonction de déverrouillage");
 
       try {
         await sm.unlockSession(mnemonic);
         
-        // Wire SQLCipher unlock via IPC using the exact required argument 'hexKey'
+        console.log("🚨 BALISE 2 : Préparation de la clé terminée, appel à Rust en cours...");
         const dbKeyHex = bytesToHex(sm.getDbKey().expose() as Uint8Array);
         await unlockDatabase(dbKeyHex);
+        console.log("🚨 BALISE 3 : Rust a répondu avec succès !");
 
         const id = sm.getIdentity();
         setIsLocked(false);
         setAccountId(id.accountId);
         setIdentity(id);
       } catch (err: unknown) {
+        console.error("❌ ERREUR CAPTURÉE :", err);
         const message =
           err instanceof Error ? err.message : 'Erreur de déverrouillage';
         setError(message);
@@ -138,6 +141,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
         setAccountId(null);
         setIdentity(null);
       } finally {
+        console.log("🚨 BALISE 4 : Fin de la fonction, désactivation de l'écran de chargement");
         setIsLoading(false);
       }
     },
