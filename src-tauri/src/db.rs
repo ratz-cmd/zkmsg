@@ -23,7 +23,10 @@ pub struct MessageRecord {
 /// Injects the master SQLCipher key (hex) to unlock the DB in Rust memory.
 #[command]
 pub fn unlock_database(state: State<'_, AppState>, hex_key: String) -> Result<(), String> {
-    let path = "zkmsg_secure.db"; // Local storage path (should be resolved to app_data_dir in prod)
+    // Debug Mode Support: Allows 2 instances simultaneously
+    let db_name = std::env::var("TAURI_DB_NAME").unwrap_or_else(|_| "zkmsg_secure.db".to_string());
+    let path = db_name.as_str(); // Local storage path (should be resolved to app_data_dir in prod)
+    
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     
     // Apply SQLCipher encryption pragmas
