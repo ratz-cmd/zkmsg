@@ -78,7 +78,7 @@ function deriveWithHkdf(
   const infoBytes = new TextEncoder().encode(info);
 
   const derived = hkdf(sha256, seedBytes, EMPTY_SALT, infoBytes, length);
-  return SecureBuffer.wrap(derived);
+  return SecureBuffer.from(derived);
 }
 
 /**

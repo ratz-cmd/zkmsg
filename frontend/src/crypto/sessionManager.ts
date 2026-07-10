@@ -291,5 +291,5 @@ function deriveX25519Seed(masterSeed: SecureBuffer): SecureBuffer {
   const seedBytes = masterSeed.expose() as Uint8Array;
   const info = new TextEncoder().encode('zkmsg-x25519-v1');
   const derived = hkdf(sha256, seedBytes, new Uint8Array(32), info, 32);
-  return SecureBuffer.wrap(derived);
+  return SecureBuffer.from(derived);
 }
