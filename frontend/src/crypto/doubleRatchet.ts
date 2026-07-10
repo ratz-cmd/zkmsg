@@ -91,7 +91,12 @@ export class DoubleRatchet {
     return { rk: SecureBuffer.from(out.slice(0, 32)), ck: SecureBuffer.from(out.slice(32, 64)) };
   }
 
-  static async encrypt(state: RatchetState, plaintext: Uint8Array, ad: Uint8Array): Promise<{ header: MessageHeader, ciphertext: Uint8Array }> {
+  static async encrypt(
+    state: RatchetState,
+    plaintext: Uint8Array,
+    ad: Uint8Array,
+    persist: (state: RatchetState) => Promise<void>
+  ): Promise<{ header: MessageHeader, ciphertext: Uint8Array }> {
     if (!state.CKs) throw new Error("Cannot encrypt: CKs is null");
     
     const { ck, mk } = this.kdfCK(state.CKs);
@@ -115,11 +120,19 @@ export class DoubleRatchet {
     ciphertext.set(nonce, 0);
     ciphertext.set(ciphertextBase, nonce.length);
     
+    
     mk.zero();
+    await persist(state);
     return { header, ciphertext };
   }
 
-  static async decrypt(state: RatchetState, header: MessageHeader, ciphertext: Uint8Array, ad: Uint8Array): Promise<Uint8Array> {
+  static async decrypt(
+    state: RatchetState,
+    header: MessageHeader,
+    ciphertext: Uint8Array,
+    ad: Uint8Array,
+    persist: (state: RatchetState) => Promise<void>
+  ): Promise<Uint8Array> {
     const mk = await this.trySkipMessageKeys(state, header);
     
     let messageKey = mk;
@@ -153,6 +166,8 @@ export class DoubleRatchet {
         state.MKSKIPPED.delete(keyString);
       }
     }
+
+    await persist(state);
     return pt;
   }
 
