@@ -18,6 +18,8 @@ import React, {
   type ReactNode,
 } from 'react';
 import { SessionManager, type DecryptedIdentity } from '../crypto/sessionManager';
+import { unlockDatabase, lockDatabase } from '../hooks/useChatDatabase';
+import { bytesToHex } from '@noble/hashes/utils';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Types
@@ -98,6 +100,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
   if (sessionManagerRef.current === null) {
     sessionManagerRef.current = new SessionManager(() => {
       // Callback d'auto-verrouillage — mise à jour de l'état React
+      lockDatabase().catch(console.error);
       setIsLocked(true);
       setAccountId(null);
       setIdentity(null);
@@ -117,6 +120,11 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
 
       try {
         await sm.unlockSession(mnemonic);
+        
+        // Wire SQLCipher unlock via IPC using the exact required argument 'hexKey'
+        const dbKeyHex = bytesToHex(sm.getDbKey().expose() as Uint8Array);
+        await unlockDatabase(dbKeyHex);
+
         const id = sm.getIdentity();
         setIsLocked(false);
         setAccountId(id.accountId);
@@ -141,6 +149,7 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
    */
   const lock = useCallback((): void => {
     sm.lockSession();
+    lockDatabase().catch(console.error);
     setIsLocked(true);
     setAccountId(null);
     setIdentity(null);

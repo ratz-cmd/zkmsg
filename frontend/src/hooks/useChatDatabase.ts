@@ -85,5 +85,14 @@ export async function persistRatchetAndMessage(
  * Key must be derived via Argon2id (Phase 1) and passed here.
  */
 export async function unlockDatabase(hexKey: string): Promise<void> {
-  await invoke('unlock_database', { hexKey });
+  // Tauri v2 strictly expects camelCase parameter names matching the Rust snake_case argument.
+  await invoke('unlock_database', { hexKey: hexKey });
+}
+
+/**
+ * Locks the SQLCipher database. 
+ * Clears the decrypted SQLite cache from RAM and drops the file descriptor.
+ */
+export async function lockDatabase(): Promise<void> {
+  await invoke('lock_database');
 }

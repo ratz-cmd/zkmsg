@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "identifier": "com.zkmsg.app",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix frontend",
+    "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build --prefix frontend",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:1420",
     "frontendDist": "frontend/dist"
   },
   "app": {

@@ -43,6 +43,7 @@ pub fn unlock_database(state: State<'_, AppState>, hex_key: String) -> Result<()
     
     // Safely store connection in global state
     let mut db_guard = state.db.lock().unwrap();
+    drop(stmt);
     *db_guard = Some(conn);
     Ok(())
 }
@@ -142,3 +143,4 @@ pub fn lock_database(state: State<'_, AppState>) -> Result<(), String> {
     *db_guard = None;
     Ok(())
 }
+

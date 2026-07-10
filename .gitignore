@@ -1,7 +1,14 @@
 node_modules/
 dist/
-build/
+dist-ssr/
+coverage/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Misc
 .env
 .DS_Store
-backend/zkmsg-server
-backend/zkmsg-server.exe
+*.db
+*.db-journal
