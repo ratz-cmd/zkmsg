@@ -101,36 +101,48 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Validate PoW token.
 	token := r.URL.Query().Get("token")
+	accountIDHex := r.URL.Query().Get("account_id")
+
+	s.logger.Info("🚨 WS HANDSHAKE START", 
+		slog.String("token", token), 
+		slog.String("account_id_hex", accountIDHex),
+	)
+
 	if token == "" {
+		s.logger.Warn("❌ WS REJECTED: missing token")
 		http.Error(w, `{"error":"missing token"}`, http.StatusUnauthorized)
 		return
 	}
 
 	if !s.pow.ValidateToken(token) {
+		s.logger.Warn("❌ WS REJECTED: invalid or expired token", slog.String("token", token))
 		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 		return
 	}
 
 	// Parse account ID.
-	accountIDHex := r.URL.Query().Get("account_id")
 	accountID, err := parseAccountID(accountIDHex)
 	if err != nil {
+		s.logger.Warn("❌ WS REJECTED: invalid account ID", slog.String("account_id_hex", accountIDHex), slog.String("error", err.Error()))
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
 	// Check max connections.
 	if s.hub.ConnectionCount() >= s.cfg.MaxConnections {
+		s.logger.Warn("❌ WS REJECTED: server at capacity")
 		http.Error(w, `{"error":"server at capacity"}`, http.StatusServiceUnavailable)
 		return
 	}
 
 	// Upgrade to WebSocket.
+	s.logger.Info("🔌 Attempting WebSocket upgrade...", slog.String("account_id", accountIDHex))
 	ws, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.logger.Warn("websocket upgrade failed", slog.String("error", err.Error()))
+		s.logger.Error("❌ WS UPGRADE FAILED", slog.String("error", err.Error()))
 		return
 	}
+	s.logger.Info("✅ WS UPGRADE SUCCESSFUL", slog.String("account_id", accountIDHex))
 
 	// Revoke the PoW token (single-use for connection establishment).
 	s.pow.RevokeToken(token)
