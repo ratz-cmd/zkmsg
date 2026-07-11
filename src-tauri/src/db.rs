@@ -24,7 +24,7 @@ pub struct MessageRecord {
 #[command]
 pub fn unlock_database(state: State<'_, AppState>, hex_key: String) -> Result<(), String> {
     // Debug Mode Support: Allows 2 instances simultaneously
-    let db_name = std::env::var("TAURI_DB_NAME").unwrap_or_else(|_| "zkmsg_secure.db".to_string());
+    let db_name = std::env::var("TAURI_DB_NAME").unwrap_or_else(|_| "default.db".to_string());
     let path = db_name.as_str(); // Local storage path (should be resolved to app_data_dir in prod)
     
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
