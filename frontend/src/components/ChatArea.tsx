@@ -40,7 +40,7 @@ export function ChatArea({
     }
   }, [messages.length]);
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleSend = (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!text.trim() && !selectedFile) return;
     onSendMessage(text, selectedFile || undefined);
@@ -183,6 +183,12 @@ export function ChatArea({
             placeholder="Écrire un message..."
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend(e);
+              }
+            }}
             className="flex-1 bg-[#24303f] text-gray-100 placeholder-gray-500 rounded-2xl px-4 py-2.5 text-[15px] focus:outline-none focus:ring-1 focus:ring-[#5288c1] shadow-inner"
           />
 

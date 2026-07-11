@@ -117,10 +117,29 @@ export class WebSocketManager {
   private accountId: string;
   private onMessageCallback: NetworkMessageHandler;
   private isConnecting = false;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(accountId: string, onMessage: NetworkMessageHandler) {
     this.accountId = accountId;
     this.onMessageCallback = onMessage;
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatInterval = setInterval(() => {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        // Send a plain text message. Go server's read pump skips non-binary messages 
+        // without crashing, effectively keeping the connection alive.
+        this.socket.send("ping");
+      }
+    }, 20000); // 20 seconds
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
   }
 
   /**
@@ -165,6 +184,7 @@ export class WebSocketManager {
       this.socket.onopen = () => {
         console.log("✅ WebSocket connecté avec succès !");
         this.isConnecting = false;
+        this.startHeartbeat();
       };
 
       this.socket.onmessage = (event) => {
@@ -192,6 +212,7 @@ export class WebSocketManager {
 
       this.socket.onclose = () => {
         console.log("⚠️ WebSocket fermé. Reconnexion dans 5s...");
+        this.stopHeartbeat();
         this.socket = null;
         this.isConnecting = false;
         setTimeout(() => this.connect(), 5000);
@@ -199,11 +220,13 @@ export class WebSocketManager {
 
       this.socket.onerror = (err) => {
         console.error("❌ Erreur WebSocket :", err);
+        this.stopHeartbeat();
         this.socket?.close();
       };
 
     } catch (err) {
       console.error("❌ Échec de la connexion réseau :", err);
+      this.stopHeartbeat();
       this.isConnecting = false;
       setTimeout(() => this.connect(), 10000); // retry after 10s
     }
@@ -245,6 +268,7 @@ export class WebSocketManager {
   }
 
   disconnect(): void {
+    this.stopHeartbeat();
     this.socket?.close();
     this.socket = null;
   }
