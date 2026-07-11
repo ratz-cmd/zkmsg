@@ -31,8 +31,8 @@ pub fn unlock_database(state: State<'_, AppState>, hex_key: String) -> Result<()
     let conn = Connection::open(path).map_err(|e| format!("Connection::open error: {}", e))?;
     
     println!("[Rust] Injecting SQLCipher hex key");
-    // Ensure we execute PRAGMA key = x'hex_key' immediately without parameter binding
-    conn.execute(&format!("PRAGMA key = x'{}';", hex_key), []).map_err(|e| format!("PRAGMA key error: {}", e))?;
+    // Ensure we execute PRAGMA key = "x'hex_key'" immediately without parameter binding
+    conn.execute(&format!("PRAGMA key = \"x'{}'\";", hex_key), []).map_err(|e| format!("PRAGMA key error: {}", e))?;
     
     println!("[Rust] Setting cipher page size to 4096");
     conn.execute("PRAGMA cipher_page_size = 4096;", []).map_err(|e| format!("PRAGMA cipher_page_size error: {}", e))?;
