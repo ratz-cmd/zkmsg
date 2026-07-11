@@ -27,23 +27,29 @@ pub fn unlock_database(state: State<'_, AppState>, hex_key: String) -> Result<()
     let db_name = std::env::var("TAURI_DB_NAME").unwrap_or_else(|_| "default.db".to_string());
     let path = db_name.as_str(); // Local storage path (should be resolved to app_data_dir in prod)
     
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    println!("[Rust] Opening database file: {}", path);
+    let conn = Connection::open(path).map_err(|e| format!("Connection::open error: {}", e))?;
     
-    // Apply SQLCipher encryption pragmas
-    conn.pragma_update(None, "key", &hex_key).map_err(|e| e.to_string())?;
-    conn.pragma_update(None, "cipher_page_size", 4096).map_err(|e| e.to_string())?;
+    println!("[Rust] Injecting SQLCipher hex key");
+    // Ensure we execute PRAGMA key = x'hex_key' immediately without parameter binding
+    conn.execute(&format!("PRAGMA key = x'{}';", hex_key), []).map_err(|e| format!("PRAGMA key error: {}", e))?;
     
+    println!("[Rust] Setting cipher page size to 4096");
+    conn.execute("PRAGMA cipher_page_size = 4096;", []).map_err(|e| format!("PRAGMA cipher_page_size error: {}", e))?;
+    
+    println!("[Rust] Verifying database key by querying sqlite_master");
     // Verify key correctness by reading schema
-    let mut stmt = conn.prepare("SELECT count(*) FROM sqlite_master;").map_err(|e| e.to_string())?;
-    let _ = stmt.query_row([], |row| row.get::<_, i32>(0)).map_err(|_| "Invalid DB Key or corrupted database".to_string())?;
+    let mut stmt = conn.prepare("SELECT count(*) FROM sqlite_master;").map_err(|e| format!("Prepare verification query error: {}", e))?;
+    let _ = stmt.query_row([], |row| row.get::<_, i32>(0)).map_err(|e| format!("DB key verification failed (file is not a database or wrong key): {}", e))?;
+    drop(stmt);
     
-    // Initialize schema if empty
+    println!("[Rust] Key verified. Running schema migration");
     let schema = include_str!("schema.sql");
-    conn.execute_batch(schema).map_err(|e| e.to_string())?;
+    conn.execute_batch(schema).map_err(|e| format!("Schema execution error: {}", e))?;
     
+    println!("[Rust] Database unlocked and migrated successfully");
     // Safely store connection in global state
     let mut db_guard = state.db.lock().unwrap();
-    drop(stmt);
     *db_guard = Some(conn);
     Ok(())
 }
