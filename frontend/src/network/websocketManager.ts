@@ -1,5 +1,4 @@
 import { sha256 } from '@noble/hashes/sha256';
-import bs58 from 'bs58';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8080';
 const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8080';
@@ -171,9 +170,8 @@ export class WebSocketManager {
       const verifyData = await verifyRes.json();
       const token = verifyData.token;
 
-      // Hex encode the Account ID (Go server expects 32 bytes hex)
-      const accountIdBytes = bs58.decode(this.accountId);
-      const accountIdHex = bytesToHex(accountIdBytes);
+      // Account ID is now a 32-byte public key hex string
+      const accountIdHex = this.accountId;
 
       const wsUrl = `${WS_BASE_URL}/ws?token=${token}&account_id=${accountIdHex}`;
       console.log(`🔌 Connexion au WebSocket : ${wsUrl}`);
@@ -240,7 +238,7 @@ export class WebSocketManager {
       throw new Error("Impossible d'envoyer le message : WebSocket déconnecté");
     }
 
-    const recipientBytes = bs58.decode(toAccountId);
+    const recipientBytes = hexToBytes(toAccountId);
     if (recipientBytes.length !== 32) {
       throw new Error("L'identifiant du destinataire doit faire 32 octets");
     }

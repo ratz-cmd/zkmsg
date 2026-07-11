@@ -7,12 +7,14 @@ import { QRScanner } from '../components/QRScanner';
 import { WebSocketManager } from '../network/websocketManager';
 import { X, QrCode } from 'lucide-react';
 import { bytesToHex } from '@noble/hashes/utils';
+import { invoke } from '@tauri-apps/api/core';
 
 export function ChatPage(): React.JSX.Element {
   const { accountId, identity, lock } = useAuth();
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [myQrBundle, setMyQrBundle] = useState<string | null>(null);
+  const [manualAccountId, setManualAccountId] = useState('');
 
   // Chats list (empty by default, populated dynamically as we add or receive)
   const [chats, setChats] = useState<Chat[]>([]);
@@ -179,6 +181,31 @@ export function ChatPage(): React.JSX.Element {
     setActiveChatId(targetAccountId);
   };
 
+  const handleManualAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanId = manualAccountId.trim();
+    if (cleanId.length !== 64) {
+      alert("L'Account ID doit faire exactement 64 caractères hexadécimaux.");
+      return;
+    }
+    if (cleanId === accountId) {
+      alert("Vous ne pouvez pas vous ajouter vous-même.");
+      return;
+    }
+
+    try {
+      console.log(`🔑 Dérivation du secret partagé ECDH avec ${cleanId}...`);
+      const sharedSecret = await invoke<string>('derive_shared_secret', { peerPublicKeyHex: cleanId });
+      alert(`✅ Session sécurisée démarrée !\n\nSecret partagé dérivé (ECDH):\n${sharedSecret}`);
+      
+      handleScanSuccess(cleanId);
+      setManualAccountId('');
+    } catch (err) {
+      console.error("ECDH derivation failed:", err);
+      alert("Échec de la dérivation ECDH : " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const showMyBundle = () => {
     if (accountId) {
       // In prod, this would serialize the full public keys (X3DH Bundle)
@@ -277,6 +304,28 @@ export function ChatPage(): React.JSX.Element {
             ) : (
               <div className="space-y-6">
                 <QRScanner onScanSuccess={handleScanSuccess} />
+                
+                <div className="border-t border-[#24303f] pt-4 mt-4">
+                  <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 block">
+                    Ou coller l'Account ID du contact
+                  </label>
+                  <form onSubmit={handleManualAdd} className="flex flex-col space-y-2">
+                    <input 
+                      type="text" 
+                      placeholder="Account ID (clé publique hex 64 chars)..." 
+                      value={manualAccountId}
+                      onChange={(e) => setManualAccountId(e.target.value)}
+                      className="w-full bg-[#202b36] border border-[#24303f] rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#5288c1] font-mono text-gray-200"
+                    />
+                    <button 
+                      type="submit"
+                      className="w-full py-2.5 bg-[#2b5278] hover:bg-[#346290] text-white text-sm font-semibold rounded-xl transition-colors"
+                    >
+                      Démarrer la session sécurisée
+                    </button>
+                  </form>
+                </div>
+
                 <div className="text-center">
                   <button 
                     onClick={showMyBundle}

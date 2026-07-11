@@ -190,3 +190,48 @@ pub fn get_or_create_identity(state: State<'_, AppState>) -> Result<String, Stri
     Ok(public_hex)
 }
 
+/// Derives a shared secret using ECDH (Curve25519) between our static secret key 
+/// and the peer's public key. Returns the 32-byte secret as a hex string.
+#[command]
+pub fn derive_shared_secret(state: State<'_, AppState>, peer_public_key_hex: String) -> Result<String, String> {
+    use x25519_dalek::{StaticSecret, PublicKey};
+
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_mut().ok_or("Database is locked. Please unlock first.")?;
+
+    // 1. Fetch our private key from the Identity table
+    let mut stmt = conn.prepare("SELECT private_key FROM Identity WHERE id = 1").map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+
+    let our_private_hex: String = if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        row.get(0).map_err(|e| e.to_string())?
+    } else {
+        return Err("No local identity found. Database might be corrupt or uninitialized.".to_string());
+    };
+
+    let our_private_bytes = hex::decode(our_private_hex).map_err(|e| e.to_string())?;
+    if our_private_bytes.len() != 32 {
+        return Err("Stored private key is invalid (must be 32 bytes)".to_string());
+    }
+
+    let mut our_private_arr = [0u8; 32];
+    our_private_arr.copy_from_slice(&our_private_bytes);
+    let our_secret = StaticSecret::from(our_private_arr);
+
+    // 2. Decode the peer's public key
+    let peer_public_bytes = hex::decode(peer_public_key_hex).map_err(|e| e.to_string())?;
+    if peer_public_bytes.len() != 32 {
+        return Err("Peer public key must be exactly 32 bytes (64 hex characters)".to_string());
+    }
+
+    let mut peer_public_arr = [0u8; 32];
+    peer_public_arr.copy_from_slice(&peer_public_bytes);
+    let peer_public = PublicKey::from(peer_public_arr);
+
+    // 3. Perform Diffie-Hellman Key Agreement
+    let shared_secret = our_secret.diffie_hellman(&peer_public);
+
+    // 4. Return the hex-encoded shared secret
+    Ok(hex::encode(shared_secret.as_bytes()))
+}
+

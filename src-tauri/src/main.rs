@@ -17,7 +17,8 @@ fn main() {
             db::lock_database,
             db::load_messages,
             db::save_ratchet_and_message,
-            db::get_or_create_identity
+            db::get_or_create_identity,
+            db::derive_shared_secret
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
