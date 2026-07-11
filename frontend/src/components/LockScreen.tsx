@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Lock } from 'lucide-react';
 
 interface LockScreenProps {

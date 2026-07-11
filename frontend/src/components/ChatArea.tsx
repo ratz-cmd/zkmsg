@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, Send, User, Trash2, ShieldAlert } from 'lucide-react';
+import { Paperclip, Send, Trash2, ShieldAlert } from 'lucide-react';
 import { MessageBubble, type Message } from './MessageBubble';
 import { useVirtualizer } from '@tanstack/react-virtual';
 

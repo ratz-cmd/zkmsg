@@ -18,7 +18,7 @@ interface Message {
 }
 
 export function AppLayout() {
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages] = useState<Message[]>([
     { id: '1', senderId: 'peer', text: 'Hello, is this channel secure?', timestamp: new Date(), isSelf: false },
     { id: '2', senderId: 'self', text: 'Yes, Double Ratchet is active.', timestamp: new Date(), isSelf: true },
     {
