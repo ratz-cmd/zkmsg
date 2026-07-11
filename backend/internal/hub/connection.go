@@ -86,6 +86,12 @@ func (c *Connection) ReadPump() {
 			return
 		}
 
+		// Intercept frontend keep-alive pings and extend read deadline.
+		if messageType == websocket.TextMessage && string(message) == "ping" {
+			_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+			continue
+		}
+
 		// Only process binary messages (envelopes are binary).
 		if messageType != websocket.BinaryMessage {
 			c.logger.Debug("ignoring non-binary message",
