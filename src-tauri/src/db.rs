@@ -144,3 +144,49 @@ pub fn lock_database(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Retrieves the existing Curve25519 public key (account ID) from SQLite, 
+/// or generates a new one using x25519-dalek and persists it.
+#[command]
+pub fn get_or_create_identity(state: State<'_, AppState>) -> Result<String, String> {
+    use x25519_dalek::{StaticSecret, PublicKey};
+
+    let mut db_guard = state.db.lock().unwrap();
+    let conn = db_guard.as_mut().ok_or("Database is locked. Please unlock first.")?;
+    
+    // Create Identity table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS Identity (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            public_key TEXT NOT NULL,
+            private_key TEXT NOT NULL
+         )",
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    // Check if identity already exists
+    let mut stmt = conn.prepare("SELECT public_key FROM Identity WHERE id = 1").map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+
+    if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let pub_key_hex: String = row.get(0).map_err(|e| e.to_string())?;
+        return Ok(pub_key_hex);
+    }
+
+    // Generate new Curve25519 keypair using local rand thread_rng and load via From<[u8;32]>
+    use rand::RngCore;
+    let mut key_bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut key_bytes);
+    let secret = StaticSecret::from(key_bytes);
+    let public = PublicKey::from(&secret);
+
+    let secret_hex = hex::encode(secret.to_bytes());
+    let public_hex = hex::encode(public.as_bytes());
+
+    conn.execute(
+        "INSERT INTO Identity (id, public_key, private_key) VALUES (1, ?, ?)",
+        params![public_hex, secret_hex],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(public_hex)
+}
+

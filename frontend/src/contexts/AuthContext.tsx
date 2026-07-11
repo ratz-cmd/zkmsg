@@ -20,6 +20,7 @@ import React, {
 import { SessionManager, type DecryptedIdentity } from '../crypto/sessionManager';
 import { unlockDatabase, lockDatabase } from '../hooks/useChatDatabase';
 import { bytesToHex } from '@noble/hashes/utils';
+import { invoke } from '@tauri-apps/api/core';
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Types
@@ -127,10 +128,16 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
         await unlockDatabase(dbKeyHex);
         console.log("🚨 BALISE 3 : Rust a répondu avec succès !");
 
+        // Obtenir ou générer la clé d'identité Curve25519 depuis Rust (SQLCipher)
+        const realAccountId = await invoke<string>('get_or_create_identity');
+
         const id = sm.getIdentity();
         setIsLocked(false);
-        setAccountId(id.accountId);
-        setIdentity(id);
+        setAccountId(realAccountId);
+        setIdentity({
+          ...id,
+          accountId: realAccountId
+        });
       } catch (err: unknown) {
         console.error("❌ ERREUR CAPTURÉE :", err);
         const message =
