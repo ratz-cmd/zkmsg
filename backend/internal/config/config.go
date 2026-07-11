@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -93,7 +94,17 @@ func Load() (*Config, error) {
 		PingPeriod:             54 * time.Second,
 		MaxMessageSize:         65536, // 64 KB
 		ShutdownTimeout:        15 * time.Second,
-		CORSAllowedOrigins:     []string{},
+		CORSAllowedOrigins: []string{
+			"http://localhost:1420",
+			"http://127.0.0.1:1420",
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+			"tauri://localhost",
+		},
+	}
+
+	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {
+		cfg.CORSAllowedOrigins = strings.Split(v, ",")
 	}
 
 	if v := os.Getenv("PORT"); v != "" {
