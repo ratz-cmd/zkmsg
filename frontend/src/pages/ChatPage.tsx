@@ -1,157 +1,105 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Sidebar, type Chat } from '../components/Sidebar';
 import { ChatArea } from '../components/ChatArea';
 import { type Message } from '../components/MessageBubble';
 import { QRScanner } from '../components/QRScanner';
+import { WebSocketManager } from '../network/websocketManager';
 import { X, QrCode } from 'lucide-react';
+import { bytesToHex } from '@noble/hashes/utils';
 
 export function ChatPage(): React.JSX.Element {
-  const { accountId, lock } = useAuth();
-  const [activeChatId, setActiveChatId] = useState<string | null>('1');
+  const { accountId, identity, lock } = useAuth();
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [myQrBundle, setMyQrBundle] = useState<string | null>(null);
 
-  // Mock Chats
-  const [chats, setChats] = useState<Chat[]>([
-    {
-      id: '1',
-      name: 'Alice (Secured)',
-      avatarColor: '#5288c1',
-      lastMessage: 'Le ratchet s\'est synchronisé avec succès.',
-      timestamp: new Date(Date.now() - 1000 * 60 * 5),
-      unreadCount: 0,
-      isOnline: true,
-    },
-    {
-      id: '2',
-      name: 'Bob (Zero-Knowledge)',
-      avatarColor: '#a370f0',
-      lastMessage: 'Envoie-moi le document chiffré.',
-      timestamp: new Date(Date.now() - 1000 * 60 * 30),
-      unreadCount: 2,
-      isOnline: false,
-    },
-    {
-      id: '3',
-      name: 'Carol (Double Ratchet)',
-      avatarColor: '#22c55e',
-      lastMessage: 'Fichier reçu : architecture.pdf',
-      timestamp: new Date(Date.now() - 1000 * 60 * 120),
-      unreadCount: 0,
-      isOnline: true,
-    }
-  ]);
+  // Chats list (empty by default, populated dynamically as we add or receive)
+  const [chats, setChats] = useState<Chat[]>([]);
 
-  // Mock Messages indexed by chatId
-  const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({
-    '1': [
-      {
-        id: 'm1',
-        senderId: 'peer',
-        text: 'Salut ! Notre canal de communication est-il sécurisé ?',
-        timestamp: new Date(Date.now() - 1000 * 60 * 20),
-        isSelf: false,
-        status: 'read'
-      },
-      {
-        id: 'm2',
-        senderId: 'self',
-        text: 'Oui, nous utilisons X3DH pour l\'échange initial de clés hors-ligne et Double Ratchet pour le chiffrement à la volée.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 18),
-        isSelf: true,
-        status: 'read'
-      },
-      {
-        id: 'm3',
-        senderId: 'peer',
-        text: 'Génial. Pas de clés stockées sur le serveur Go ?',
-        timestamp: new Date(Date.now() - 1000 * 60 * 10),
-        isSelf: false,
-        status: 'read'
-      },
-      {
-        id: 'm4',
-        senderId: 'self',
-        text: 'Absolument rien. Le serveur ne voit que des enveloppes opaques de livraison.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 8),
-        isSelf: true,
-        status: 'read'
-      },
-      {
-        id: 'm5',
-        senderId: 'peer',
-        text: 'Le ratchet s\'est synchronisé avec succès.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 5),
-        isSelf: false,
-        status: 'read'
-      }
-    ],
-    '2': [
-      {
-        id: 'm6',
-        senderId: 'peer',
-        text: 'Salut Bob. J\'ai implémenté le streaming cryptographique pour les fichiers lourds.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 40),
-        isSelf: false,
-        status: 'read'
-      },
-      {
-        id: 'm7',
-        senderId: 'self',
-        text: 'Top ! Faisons un test avec une pièce jointe.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 35),
-        isSelf: true,
-        status: 'read'
-      },
-      {
-        id: 'm8',
-        senderId: 'peer',
-        text: 'Envoie-moi le document chiffré.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 30),
-        isSelf: false,
-        status: 'delivered'
-      }
-    ],
-    '3': [
-      {
-        id: 'm9',
-        senderId: 'self',
-        text: 'Voici l\'architecture mise à jour.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 130),
-        isSelf: true,
-        status: 'read'
-      },
-      {
-        id: 'm10',
-        senderId: 'self',
-        attachment: {
-          filename: 'architecture_zkmsg_v2.pdf',
-          size: 4194304, // 4 MB
-          mime_type: 'application/pdf',
-          blob_id: 'blob_992a0134f'
-        },
-        timestamp: new Date(Date.now() - 1000 * 60 * 125),
-        isSelf: true,
-        status: 'read'
-      },
-      {
-        id: 'm11',
-        senderId: 'peer',
-        text: 'Fichier reçu : architecture.pdf',
-        timestamp: new Date(Date.now() - 1000 * 60 * 120),
-        isSelf: false,
-        status: 'read'
-      }
-    ]
-  });
+  // Messages map indexed by chatId
+  const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({});
+
+  // WebSocket Manager reference
+  const wsManagerRef = useRef<WebSocketManager | null>(null);
+
+  // Initialize Network Connection
+  useEffect(() => {
+    if (!accountId) return;
+
+    // Incoming message handler from network
+    const handleIncomingMessage = (senderId: string, text: string, timestamp: Date) => {
+      // Avoid self-reflection if the router loops (should not happen, but safe)
+      if (senderId === accountId) return;
+
+      setChats(prev => {
+        const exists = prev.some(c => c.id === senderId);
+        if (!exists) {
+          const newChat: Chat = {
+            id: senderId,
+            name: `${senderId.slice(0, 8)}…${senderId.slice(-6)}`,
+            avatarColor: '#a370f0',
+            lastMessage: text,
+            timestamp,
+            unreadCount: 1,
+            isOnline: true
+          };
+          return [newChat, ...prev];
+        }
+        return prev.map(chat => {
+          if (chat.id === senderId) {
+            return {
+              ...chat,
+              lastMessage: text,
+              timestamp,
+              unreadCount: activeChatId === senderId ? 0 : chat.unreadCount + 1
+            };
+          }
+          return chat;
+        });
+      });
+
+      setMessagesMap(prev => ({
+        ...prev,
+        [senderId]: [...(prev[senderId] || []), {
+          id: Math.random().toString(),
+          senderId,
+          text,
+          timestamp,
+          isSelf: false,
+          status: 'read'
+        }]
+      }));
+    };
+
+    const manager = new WebSocketManager(accountId, handleIncomingMessage);
+    manager.connect();
+    wsManagerRef.current = manager;
+
+    return () => {
+      manager.disconnect();
+      wsManagerRef.current = null;
+    };
+  }, [accountId, activeChatId]);
 
   const activeChat = chats.find(c => c.id === activeChatId) || null;
   const activeMessages = activeChatId ? (messagesMap[activeChatId] || []) : [];
 
   const handleSendMessage = (text: string, file?: File) => {
-    if (!activeChatId) return;
+    if (!activeChatId || !accountId) return;
 
+    // 1. Dispatch over WebSocket Network
+    if (wsManagerRef.current) {
+      try {
+        wsManagerRef.current.sendMessage(activeChatId, text);
+      } catch (err) {
+        console.error("Network send failed:", err);
+        alert("Erreur réseau : " + (err instanceof Error ? err.message : String(err)));
+        return;
+      }
+    }
+
+    // 2. Append locally
     const newMessage: Message = {
       id: Math.random().toString(),
       senderId: 'self',
@@ -167,13 +115,11 @@ export function ChatPage(): React.JSX.Element {
       status: 'sent'
     };
 
-    // Update messages
     setMessagesMap(prev => ({
       ...prev,
       [activeChatId]: [...(prev[activeChatId] || []), newMessage]
     }));
 
-    // Update last message in chat list
     setChats(prev => prev.map(chat => {
       if (chat.id === activeChatId) {
         return {
@@ -184,34 +130,6 @@ export function ChatPage(): React.JSX.Element {
       }
       return chat;
     }));
-
-    // Mock automatic reply for active design feedback
-    setTimeout(() => {
-      const replyMessage: Message = {
-        id: Math.random().toString(),
-        senderId: 'peer',
-        text: `[Mock ZK Auto-Reply] Message reçu de manière sécurisée sur ${activeChat?.name}`,
-        timestamp: new Date(),
-        isSelf: false,
-        status: 'read'
-      };
-
-      setMessagesMap(prev => ({
-        ...prev,
-        [activeChatId]: [...(prev[activeChatId] || []), replyMessage]
-      }));
-
-      setChats(prev => prev.map(chat => {
-        if (chat.id === activeChatId) {
-          return {
-            ...chat,
-            lastMessage: replyMessage.text || '',
-            timestamp: new Date()
-          };
-        }
-        return chat;
-      }));
-    }, 1500);
   };
 
   const handleClearHistory = () => {
@@ -230,39 +148,42 @@ export function ChatPage(): React.JSX.Element {
 
   const handleScanSuccess = (payload: string) => {
     setShowAddContactModal(false);
-    // Parse simulated Base58 bundle (mock behavior)
-    const newChatId = (chats.length + 1).toString();
-    const newChat: Chat = {
-      id: newChatId,
-      name: `Contact ${payload.slice(0, 8)}...`,
-      avatarColor: '#' + Math.floor(Math.random()*16777215).toString(16),
-      lastMessage: 'Bundle X3DH importé hors-ligne',
-      timestamp: new Date(),
-      unreadCount: 0,
-      isOnline: true
-    };
+    
+    // Parse simulated Base58 bundle (representing target Account ID)
+    // QR payload can be target's Account ID directly or an encoded X3DH bundle
+    const targetAccountId = payload.startsWith('zkmsg-bundle-')
+      ? payload.split('-')[2] // extract mock ID
+      : payload;
 
-    setChats(prev => [newChat, ...prev]);
-    setMessagesMap(prev => ({
-      ...prev,
-      [newChatId]: [{
-        id: Math.random().toString(),
-        senderId: 'peer',
-        text: `Canal sécurisé ouvert. Bundle importé : ${payload}`,
+    if (targetAccountId === accountId) {
+      alert("Vous ne pouvez pas vous ajouter vous-même.");
+      return;
+    }
+
+    setChats(prev => {
+      const exists = prev.some(c => c.id === targetAccountId);
+      if (exists) return prev;
+      
+      const newChat: Chat = {
+        id: targetAccountId,
+        name: `${targetAccountId.slice(0, 8)}…${targetAccountId.slice(-6)}`,
+        avatarColor: '#5288c1',
+        lastMessage: 'Bundle X3DH importé hors-ligne',
         timestamp: new Date(),
-        isSelf: false,
-        status: 'read'
-      }]
-    }));
-    setActiveChatId(newChatId);
+        unreadCount: 0,
+        isOnline: true
+      };
+      return [newChat, ...prev];
+    });
+
+    setActiveChatId(targetAccountId);
   };
 
-  // Generate a mock base58 payload for offline share
   const showMyBundle = () => {
     if (accountId) {
-      setMyQrBundle(`zkmsg-bundle-${accountId}-mockpayload-base58string`);
-    } else {
-      setMyQrBundle(`zkmsg-bundle-anonymous-mockpayload-base58string`);
+      // In prod, this would serialize the full public keys (X3DH Bundle)
+      // For now we encode the Account ID to demonstrate sharing
+      setMyQrBundle(accountId);
     }
   };
 
@@ -274,14 +195,13 @@ export function ChatPage(): React.JSX.Element {
         activeChatId={activeChatId}
         onSelectChat={(id) => {
           setActiveChatId(id);
-          // Reset unread count
           setChats(prev => prev.map(c => c.id === id ? { ...c, unreadCount: 0 } : c));
         }}
         onAddContactClick={() => setShowAddContactModal(true)}
         onLockSession={lock}
       />
 
-      {/* Chat panel */}
+      {/* Chat area */}
       {activeChat ? (
         <ChatArea
           chatName={activeChat.name}
@@ -296,12 +216,17 @@ export function ChatPage(): React.JSX.Element {
           <div className="w-16 h-16 rounded-full bg-[#17212b] border border-[#202b36] flex items-center justify-center text-gray-400">
             <QrCode size={32} />
           </div>
-          <p className="text-sm">Sélectionnez une conversation ou importez un contact.</p>
+          <div className="text-center max-w-md px-6">
+            <h3 className="text-gray-300 font-semibold text-sm">Prêt pour la communication sécurisée</h3>
+            <p className="text-xs text-gray-500 mt-2">
+              Votre identifiant de compte est : <span className="font-mono text-gray-400 select-all block mt-1">{accountId}</span>
+            </p>
+          </div>
           <button
             onClick={() => setShowAddContactModal(true)}
-            className="px-4 py-2 bg-[#2b5278] hover:bg-[#346290] text-white rounded-lg text-sm font-medium transition-colors"
+            className="px-4 py-2.5 bg-[#2b5278] hover:bg-[#346290] text-white rounded-xl text-sm font-medium transition-colors"
           >
-            Scanner un QR Code
+            Importer / Partager QR Code
           </button>
         </div>
       )}
@@ -319,17 +244,29 @@ export function ChatPage(): React.JSX.Element {
             
             {myQrBundle ? (
               <div className="flex flex-col items-center text-center space-y-4 pt-4">
-                <h3 className="text-lg font-semibold text-gray-100">Votre QR Code d'identité</h3>
+                <h3 className="text-lg font-semibold text-gray-100">Partager mon identité</h3>
                 <p className="text-xs text-gray-400 max-w-xs">
-                  Partagez ce QR Code hors-ligne. Il contient votre Account ID, votre clé d'identité et votre pré-clé signée.
+                  Faites scanner ce code par votre contact pour qu'il puisse dériver les clés partagées et vous envoyer un message chiffré.
                 </p>
-                {/* Simulated QR Code */}
-                <div className="p-4 bg-white rounded-2xl flex items-center justify-center">
-                  <div className="w-48 h-48 bg-gray-200 flex flex-col items-center justify-center text-black border border-gray-300">
-                    <QrCode size={120} className="text-black mb-1" />
-                    <span className="text-[10px] font-mono select-all truncate max-w-[160px]">{myQrBundle}</span>
-                  </div>
+                {/* Simulated QR Code containing Account ID */}
+                <div className="p-4 bg-white rounded-2xl flex flex-col items-center justify-center">
+                  <QrCode size={180} className="text-black" />
+                  <span className="text-[10px] font-mono text-gray-500 select-all truncate max-w-[200px] mt-2">{myQrBundle}</span>
                 </div>
+                
+                {identity && (
+                  <div className="w-full text-left bg-black/20 p-3 rounded-xl border border-white/5 space-y-1.5">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-500">Identity (Ed25519)</span>
+                      <span className="font-mono text-gray-300 truncate max-w-[150px]">{bytesToHex(identity.identityPublicKey)}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-500">PreKey (X25519)</span>
+                      <span className="font-mono text-gray-300 truncate max-w-[150px]">{bytesToHex(identity.x25519PublicKey)}</span>
+                    </div>
+                  </div>
+                )}
+
                 <button
                   onClick={() => setMyQrBundle(null)}
                   className="mt-2 text-sm text-[#5288c1] hover:underline"
@@ -345,7 +282,7 @@ export function ChatPage(): React.JSX.Element {
                     onClick={showMyBundle}
                     className="text-sm text-[#5288c1] hover:underline hover:text-blue-300 transition-colors font-medium"
                   >
-                    Montrer mon QR Code d'identité
+                    Afficher mon QR Code de contact
                   </button>
                 </div>
               </div>
