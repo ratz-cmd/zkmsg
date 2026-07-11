@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -127,7 +126,13 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Set CORS headers for all requests
+			// Skip CORS headers for WebSocket upgrades to prevent browsers from rejecting the handshake.
+			if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" || r.URL.Path == "/ws" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Set CORS headers for all other requests
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
